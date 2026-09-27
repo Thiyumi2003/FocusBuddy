@@ -1,0 +1,1 @@
+export type TabId = 'team' | 'ai' | 'progress' | 'subscription';
