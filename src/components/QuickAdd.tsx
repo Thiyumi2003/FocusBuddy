@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { format } from 'date-fns';
 import { PlusIcon, SparklesIcon } from 'lucide-react';
-import { NewReminderInput, Priority } from '../types/reminders';
+import { NewReminderInput, Person, Priority } from '../types/reminders';
 import { parseReminder, ParsedReminder } from '../utils/parseReminder';
 import { FormField, inputClass } from './FormField';
 import { Mascot } from './Mascot';
@@ -10,6 +10,8 @@ import { PriorityPicker } from './PriorityPicker';
 
 interface QuickAddProps {
   onCreate: (input: NewReminderInput) => void;
+  assignees?: Person[];
+  canAssignOthers?: boolean;
 }
 
 const ease = [0.23, 1, 0.32, 1] as const;
@@ -53,7 +55,7 @@ function timeForPeriod(period: string | null) {
   return '09:00';
 }
 
-export function QuickAdd({ onCreate }: QuickAddProps) {
+export function QuickAdd({ onCreate, assignees = [], canAssignOthers = false }: QuickAddProps) {
   const [mode, setMode] = useState<'natural' | 'form'>('natural');
   const [text, setText] = useState('');
   const [draft, setDraft] = useState<ParsedReminder | null>(null);
@@ -62,10 +64,24 @@ export function QuickAdd({ onCreate }: QuickAddProps) {
   const [dueDate, setDueDate] = useState(() => toDateInputValue(new Date()));
   const [dueTime, setDueTime] = useState('09:00');
   const [note, setNote] = useState('');
+  const [assigneeId, setAssigneeId] = useState('');
+  const hasAssigneeChoices = canAssignOthers && assignees.length > 1;
+  const selectedAssigneeId = assignees.some((person) => person.id === assigneeId) ? assigneeId : assignees.find((person) => person.isMe)?.id ?? '';
+  const assigneeField = hasAssigneeChoices ?
+    <FormField label="Assign to" htmlFor="qa-assignee">
+      <select id="qa-assignee" value={selectedAssigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={inputClass}>
+        {assignees.map((person) => <option key={person.id} value={person.id}>{person.name}{person.isMe ? ' (you)' : ''}</option>)}
+      </select>
+    </FormField> : null;
+
   function organise(value: string = text) {
     if (!value.trim()) return;
     const parsed = parseReminder(value);
     setDraft(parsed);
+    if (canAssignOthers) {
+      const match = assignees.find((person) => person.name.split(/\s+/)[0].toLowerCase() === parsed.forWhom.toLowerCase());
+      setAssigneeId(parsed.forWhom === 'Me' ? assignees.find((person) => person.isMe)?.id ?? '' : match?.id ?? assignees.find((person) => person.isMe)?.id ?? '');
+    }
     setDueDate(dateForDueLabel(parsed.due));
     setDueTime(timeForPeriod(parsed.period));
   }
@@ -76,6 +92,7 @@ export function QuickAdd({ onCreate }: QuickAddProps) {
       title: draft.title,
       priority: draft.priority,
       forWhom: draft.forWhom,
+      assigneeId: selectedAssigneeId,
       due: dateLabel(dueDate),
       dueDate,
       dueTime,
@@ -93,6 +110,7 @@ export function QuickAdd({ onCreate }: QuickAddProps) {
       title: activity.trim(),
       priority,
       forWhom: 'Me',
+      assigneeId: selectedAssigneeId,
       due: dateLabel(dueDate),
       dueDate,
       dueTime,
@@ -170,7 +188,7 @@ export function QuickAdd({ onCreate }: QuickAddProps) {
             
                 <div className="border-t border-line px-4 py-4">
                   <p className="text-[13px] text-muted">Here’s what I understood</p>
-                  <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+                  <div className={`mt-3 grid gap-4 sm:grid-cols-2 ${hasAssigneeChoices ? 'lg:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))]' : 'lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]'}`}>
                     <FormField label="Activity" htmlFor="draft-title">
                       <input
                     id="draft-title"
@@ -188,6 +206,7 @@ export function QuickAdd({ onCreate }: QuickAddProps) {
                     <FormField label="Priority">
                       <PriorityPicker value={draft.priority} onChange={(p) => setDraft({ ...draft, priority: p })} />
                     </FormField>
+                    {assigneeField}
                   </div>
                   {draft.suggestion &&
               <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-accent-soft px-3 py-2 text-[13px] text-accent-ink">
@@ -252,6 +271,7 @@ export function QuickAdd({ onCreate }: QuickAddProps) {
             className={inputClass} />
           
           </FormField>
+          {assigneeField}
           <div className="flex items-end">
             <button
             type="submit"

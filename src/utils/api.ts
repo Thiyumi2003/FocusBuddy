@@ -1,5 +1,5 @@
 import { SessionUser, Workspace } from '../types/session';
-import { NewReminderInput, Reminder } from '../types/reminders';
+import { NewReminderInput, Person, Reminder } from '../types/reminders';
 
 const TOKEN_KEY = 'diva.authToken';
 const USER_KEY = 'diva.sessionUser';
@@ -64,12 +64,22 @@ export async function createPersonalWorkspace() {
   return result.workspace;
 }
 
+export async function getWorkspaces() {
+  const result = await authenticatedRequest<{ workspaces: Workspace[] }>('/api/workspaces');
+  return result.workspaces;
+}
+
 export async function createTeamWorkspace(payload: { name: string; category: string; description: string }) {
   const result = await authenticatedRequest<{ workspace: Workspace }>('/api/workspaces', {
     method: 'POST',
     body: JSON.stringify(payload)
   });
   return result.workspace;
+}
+
+export async function getWorkspaceMembers(workspaceId: string) {
+  const result = await authenticatedRequest<{ members: Person[] }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/members`);
+  return result.members;
 }
 
 export async function joinTeamWorkspace(code: string) {
@@ -130,6 +140,12 @@ export function updateReminder(reminderId: string, changes: Partial<Reminder>) {
   return authenticatedRequest<Reminder>(`/api/reminders/${reminderId}`, {
     method: 'PATCH',
     body: JSON.stringify(changes)
+  });
+}
+
+export function deleteReminder(reminderId: string) {
+  return authenticatedRequest<{ ok: true }>(`/api/reminders/${reminderId}`, {
+    method: 'DELETE'
   });
 }
 

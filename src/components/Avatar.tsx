@@ -7,7 +7,7 @@ const dims = { sm: 'h-6 w-6 text-[9px]', md: 'h-10 w-10 text-xs', lg: 'h-14 w-14
 
 export function Avatar({ person, size = 'sm' }: {person: Person;size?: 'sm' | 'md' | 'lg';}) {
   const { user } = useSession();
-  const url = person.isMe ? avatarUrl(user?.avatar) ?? person.avatarUrl : person.avatarUrl;
+  const url = person.isMe ? avatarUrl(user?.avatar) ?? avatarUrl(person.avatar) ?? person.avatarUrl : avatarUrl(person.avatar) ?? person.avatarUrl;
 
   if (url) {
     return (

@@ -7,6 +7,8 @@ import { useSession } from '../contexts/SessionContext';
 import { TabId } from '../types/navigation';
 import { Space } from '../types/reminders';
 import { BrandMark } from './BrandMark';
+import { TeamSwitcher } from './TeamSwitcher';
+import { InstallAppButton } from './InstallAppButton';
 
 interface MobileNavProps {
   active: TabId;
@@ -81,6 +83,7 @@ export function MobileNav({ active, onChange, space, onSpaceChange }: MobileNavP
               )}
                 </div>
             }
+              <TeamSwitcher />
               <ul className="space-y-1">
                 {navItems.map(({ id, label, icon: Icon, tone }, i) =>
               <motion.li key={id} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, delay: 0.04 * i, ease }}>
@@ -101,6 +104,9 @@ export function MobileNav({ active, onChange, space, onSpaceChange }: MobileNavP
                   </motion.li>
               )}
               </ul>
+              <div className="mt-2">
+                <InstallAppButton />
+              </div>
               <button onClick={signOut} className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl py-2.5 text-[13px] font-bold text-muted hover:bg-canvas">
                 <LogOutIcon className="h-4 w-4" aria-hidden />
                 Sign out

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { CheckIcon, ChevronDownIcon, InboxIcon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, InboxIcon, ListTodoIcon, UsersRoundIcon, Trash2Icon } from 'lucide-react';
 import { Mascot } from '../components/Mascot';
 import { MiniProgress } from '../components/MiniProgress';
 import { QuickAdd } from '../components/QuickAdd';
@@ -11,9 +11,9 @@ import { priorityMeta } from '../data/priorities';
 import { useProgress } from '../contexts/ProgressContext';
 import { useSession } from '../contexts/SessionContext';
 import { firstNameOf } from '../utils/validation';
-import { NewReminderInput, Reminder, Space } from '../types/reminders';
+import { NewReminderInput, Person, Reminder, Space } from '../types/reminders';
 import { buildReminder, detectTimingHint, firstName } from '../utils/reminders';
-import { createReminder, getReminders, updateReminder } from '../utils/api';
+import { createReminder, getReminders, getWorkspaceMembers, updateReminder, deleteReminder } from '../utils/api';
 
 interface TeamSpaceProps {
   space: Space;
@@ -29,28 +29,49 @@ export function TeamSpace({ space, onOpenProgress }: TeamSpaceProps) {
   const { user, workspace } = useSession();
   const userFirst = user ? firstNameOf(user.name) : 'there';
   const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [members, setMembers] = useState<Person[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [showDone, setShowDone] = useState(false);
 
   useEffect(() => {
     let active = true;
-    if (!workspace?.id) {
+    const workspaceId = workspace?.id;
+    const workspaceMode = workspace?.mode;
+    if (!workspaceId) {
       setReminders([]);
       return () => { active = false; };
     }
-    getReminders(workspace.id).then((items) => {
-      if (active) setReminders(items);
-    }).catch((error) => {
-      if (active) toast.error(error instanceof Error ? error.message : 'Could not load reminders.');
-    });
-    return () => { active = false; };
-  }, [workspace?.id]);
+    const refresh = (showErrors: boolean) => {
+      getReminders(workspaceId).then((items) => {
+        if (active) setReminders(items);
+      }).catch((error) => {
+        if (active && showErrors) toast.error(error instanceof Error ? error.message : 'Could not load reminders.');
+      });
+      if (workspaceMode === 'team') {
+        getWorkspaceMembers(workspaceId).then((items) => {
+          if (active) setMembers(items);
+        }).catch((error) => {
+          if (active && showErrors) toast.error(error instanceof Error ? error.message : 'Could not load team members.');
+        });
+      } else {
+        setMembers([]);
+      }
+    };
+    refresh(true);
+    const timer = window.setInterval(() => refresh(false), 15000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [workspace?.id, workspace?.mode]);
 
   const inSpace = reminders.filter((r) => r.space === space);
   const open = inSpace.
   filter((r) => r.status === 'open' && (space === 'personal' || filter === 'all' || r.assignee.isMe)).
   sort((a, b) => priorityMeta[a.priority].rank - priorityMeta[b.priority].rank);
   const done = inSpace.filter((r) => r.status === 'done');
+  const dueToday = inSpace.filter((r) => r.status === 'open' && r.due === 'Today');
+  const totalOpen = inSpace.filter((r) => r.status === 'open').length;
   const mineToday = inSpace.filter((r) => r.status === 'open' && r.assignee.isMe && r.due === 'Today').length;
 
   function update(id: string, patch: (r: Reminder) => Partial<Reminder>) {
@@ -62,7 +83,8 @@ export function TeamSpace({ space, onOpenProgress }: TeamSpaceProps) {
       toast.error('Your workspace is not connected. Select a workspace and try again.');
       return;
     }
-    const reminder = buildReminder(input, space, user);
+    const assignedTo = input.assigneeId ? members.find((member) => member.id === input.assigneeId) : undefined;
+    const reminder = buildReminder(input, space, user, assignedTo);
     try {
       const saved = await createReminder(workspace.id, space, input, reminder.assignee);
       setReminders((list) => [saved, ...list]);
@@ -124,25 +146,56 @@ export function TeamSpace({ space, onOpenProgress }: TeamSpaceProps) {
     if (hint) toast('Reminder adjusted', { description: `Understood “${hint}”, so the timing moved.` });
   }
 
+  async function handleDelete(id: string) {
+    try {
+      await deleteReminder(id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not delete reminder.');
+      return;
+    }
+    setReminders((current) => current.filter((r) => r.id !== id));
+    toast('Reminder deleted');
+  }
+
   const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
+  const summary = [
+    { label: 'Due today', value: dueToday.length, icon: CheckIcon },
+    { label: 'Still open', value: totalOpen, icon: ListTodoIcon },
+    { label: space === 'team' ? 'Teammates' : 'Completed', value: space === 'team' ? members.length : done.length, icon: UsersRoundIcon }
+  ];
 
   return (
     <div className="mx-auto w-full max-w-[1240px] px-4 py-8 sm:px-6 lg:px-10">
-      <header className="mb-6 flex items-center gap-4">
-        <Mascot mood="wave" size={72} className="hidden shrink-0 sm:block" />
-        <div>
-        <p className="text-[13px] font-semibold text-muted">
-          {format(new Date(), 'EEEE, d MMMM')} · {space === 'team' ? workspace?.name : 'Personal Space'}
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink sm:text-[28px]">{greeting}, {userFirst} 👋</h1>
-        <p className="mt-1 text-sm text-muted">
-          {mineToday > 0 ? `${mineToday} thing${mineToday > 1 ? 's' : ''} need you today. ` : 'Nothing urgent needs you today. '}
-          I’ll pick the moments.
-        </p>
+      <header className="home-hero mb-7 text-white">
+        <div className="px-5 py-6 sm:px-8 sm:py-7">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[13px] font-bold text-[#b8e6d5]">
+                {format(new Date(), 'EEEE, d MMMM')} <span className="px-1.5 text-white/50" aria-hidden>·</span> {space === 'team' ? workspace?.name : 'Personal Space'}
+              </p>
+              <h1 className="mt-2 text-3xl font-extrabold text-white sm:text-4xl">{greeting}, {userFirst}.</h1>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-white/75">
+                {mineToday > 0 ? `${mineToday} reminder${mineToday === 1 ? '' : 's'} assigned to you today. Take them one at a time.` : 'No reminders pressing for attention today. Take the day one thing at a time.'}
+              </p>
+            </div>
+            <Mascot mood="wave" size={104} className="hidden shrink-0 sm:block" />
+          </div>
+
+          <div className="mt-6 grid grid-cols-3 border-t border-white/20 pt-4" aria-label="Today summary">
+            {summary.map(({ label, value, icon: Icon }, index) =>
+              <div key={label} className={`flex items-center gap-2.5 px-2 first:pl-0 sm:gap-3 ${index > 0 ? 'border-l border-white/20 pl-4 sm:pl-6' : ''}`}>
+                <Icon className="hidden h-4 w-4 shrink-0 text-[#b8e6d5] sm:block" aria-hidden />
+                <div>
+                  <p className="text-xl font-extrabold leading-none text-white sm:text-2xl">{value}</p>
+                  <p className="mt-1 text-[11px] font-semibold text-white/65 sm:text-xs">{label}</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      <QuickAdd onCreate={handleCreate} />
+      <QuickAdd onCreate={handleCreate} assignees={space === 'team' ? members : []} canAssignOthers={space === 'team' && workspace?.role === 'admin'} />
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section aria-labelledby="list-title">
@@ -191,7 +244,7 @@ export function TeamSpace({ space, onOpenProgress }: TeamSpaceProps) {
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.22, ease }}>
                 
-                    <ReminderRow reminder={r} onPoke={handlePoke} onDone={handleDone} onComment={handleComment} />
+                    <ReminderRow reminder={r} onPoke={handlePoke} onDone={handleDone} onComment={handleComment} onDelete={handleDelete} />
                   </motion.li>
               )}
               </AnimatePresence>
@@ -211,9 +264,20 @@ export function TeamSpace({ space, onOpenProgress }: TeamSpaceProps) {
               {showDone &&
             <ul className="mt-2 space-y-1.5 pl-6">
                   {done.map((r) =>
-              <li key={r.id} className="flex items-center gap-2 text-[13px] text-muted">
+              <li key={r.id} className="group flex items-center gap-2 text-[13px] text-muted">
                       <CheckIcon className="h-3.5 w-3.5 text-low" aria-hidden />
                       <span className="line-through">{r.title}</span>
+                      <button 
+                        onClick={() => {
+                          if (window.confirm('Are you sure you want to delete this reminder?')) {
+                            handleDelete(r.id);
+                          }
+                        }}
+                        className="opacity-0 transition-opacity group-hover:opacity-100 hover:text-rose-500"
+                        aria-label="Delete Reminder"
+                      >
+                        <Trash2Icon className="h-3 w-3" />
+                      </button>
                     </li>
               )}
                 </ul>

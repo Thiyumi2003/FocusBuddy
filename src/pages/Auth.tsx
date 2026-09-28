@@ -5,6 +5,7 @@ import { SignUpForm } from '../components/auth/SignUpForm';
 import { SocialButtons } from '../components/auth/SocialButtons';
 import { BrandMark } from '../components/BrandMark';
 import { Mascot } from '../components/Mascot';
+import { InstallAppButton } from '../components/InstallAppButton';
 import { useSession } from '../contexts/SessionContext';
 
 type Tab = 'signup' | 'login';
@@ -32,6 +33,9 @@ export function Auth() {
           <p className="mt-1 text-sm text-muted">
             {tab === 'signup' ? 'It takes less than a minute. The AI learns the rest as you go.' : 'Log in to see what needs you today.'}
           </p>
+          <div className="mt-4">
+            <InstallAppButton />
+          </div>
 
           <div role="tablist" aria-label="Authentication" className="mt-6 grid grid-cols-2 rounded-full bg-lavender-soft p-1">
             {[

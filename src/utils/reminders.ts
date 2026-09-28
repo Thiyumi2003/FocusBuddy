@@ -16,8 +16,8 @@ export function resolvePerson(user?: SessionUser | null): Person {
   };
 }
 
-export function buildReminder(input: NewReminderInput, space: Space, user?: SessionUser | null): Reminder {
-  const assignee = resolvePerson(user);
+export function buildReminder(input: NewReminderInput, space: Space, user?: SessionUser | null, assignedTo?: Person): Reminder {
+  const assignee = assignedTo ?? resolvePerson(user);
   const when = input.period ? input.period.toLowerCase() : input.due.toLowerCase();
   return {
     id: `r-${Date.now()}`,

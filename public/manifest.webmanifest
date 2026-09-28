@@ -1,0 +1,20 @@
+{
+  "id": "/",
+  "name": "FocusBuddy",
+  "short_name": "FocusBuddy",
+  "description": "A calmer way to remember what matters, on your own or with your team.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fff8f3",
+  "theme_color": "#174b45",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

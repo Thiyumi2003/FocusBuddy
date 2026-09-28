@@ -3,6 +3,8 @@ import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } fr
 import { createServer } from 'node:http';
 import { MongoClient } from 'mongodb';
 import { promisify } from 'node:util';
+import { publicVapidKey } from './services/pushService.js';
+import { startNotificationCron } from './jobs/notificationCron.js';
 
 const scrypt = promisify(scryptCallback);
 const port = Number(process.env.PORT || process.env.API_PORT || 3001);
@@ -18,7 +20,7 @@ const frontendOrigins = new Set([
 
 if (!mongoUri) throw new Error('MONGODB_URI is required. Set it in the environment or .env.');
 
-const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 10000 });
+const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 30000, connectTimeoutMS: 30000, retryWrites: true, retryReads: true });
 await client.connect();
 const mongo = client.db(process.env.MONGODB_DB || 'diva');
 const users = mongo.collection('users');
@@ -182,6 +184,11 @@ async function handle(request, response) {
 
   if (method === 'GET' && path === '/api/health') return send(response, 200, { status: 'ok', database: 'connected' });
 
+  // Public endpoint – no auth required (frontend needs it before login)
+  if (method === 'GET' && path === '/api/notifications/vapid-public-key') {
+    return send(response, 200, { publicKey: publicVapidKey });
+  }
+
   if (method === 'POST' && path === '/api/auth/signup') {
     const name = requireText(body.name, 'Name');
     const email = requireText(body.email, 'Email', 254).toLowerCase();
@@ -233,6 +240,24 @@ async function handle(request, response) {
   if (method === 'GET' && path === '/api/workspaces') {
     const workspaceList = await workspaces.find({ 'members.userId': user._id }).toArray();
     return send(response, 200, { workspaces: workspaceList.map((workspace) => publicWorkspace(workspace, user._id)) });
+  }
+
+  const workspaceMembersMatch = path.match(/^\/api\/workspaces\/([a-f\d]+)\/members$/i);
+  if (method === 'GET' && workspaceMembersMatch) {
+    const workspace = await memberWorkspace(workspaceMembersMatch[1], user._id);
+    const memberUsers = await users.find({ _id: { $in: workspace.members.map((member) => member.userId) } }).toArray();
+    const usersById = new Map(memberUsers.map((member) => [member._id, member]));
+    return send(response, 200, { members: workspace.members.flatMap((membership) => {
+      const member = usersById.get(membership.userId);
+      return member ? [{
+        id: member._id,
+        name: member.name,
+        initials: member.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
+        role: membership.role === 'admin' ? 'Admin' : 'Member',
+        isMe: member._id === user._id,
+        ...(member.avatar ? { avatar: member.avatar } : {})
+      }] : [];
+    }) });
   }
 
   if (method === 'POST' && path === '/api/workspaces/personal') {
@@ -412,18 +437,46 @@ async function handle(request, response) {
     return send(response, 200, { ...withoutMongoId(updated), id: updated._id });
   }
 
+  // --- Push Notification subscription endpoint --------------------------------
+  if (method === 'POST' && path === '/api/notifications/subscribe') {
+    const { endpoint, keys } = body;
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      return send(response, 400, { error: 'Invalid push subscription: endpoint and keys (p256dh, auth) are required' });
+    }
+    const subscription = { endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth } };
+    // Upsert: add if not already stored for this user (keyed by endpoint)
+    await users.updateOne(
+      { _id: user._id, 'pushSubscriptions.endpoint': { $ne: endpoint } },
+      { $push: { pushSubscriptions: subscription } }
+    );
+    return send(response, 200, { ok: true });
+  }
+
   if (path === '/api/reminders' && method === 'GET') {
     const workspaceId = url.searchParams.get('workspaceId');
     if (!workspaceId) return send(response, 400, { error: 'workspaceId query parameter is required' });
     await memberWorkspace(workspaceId, user._id);
     const reminderList = await reminders.find({ workspaceId }).toArray();
-    return send(response, 200, { reminders: reminderList.map((reminder) => ({ ...withoutMongoId(reminder), id: reminder._id })) });
+    return send(response, 200, { reminders: reminderList.map((reminder) => ({
+      ...withoutMongoId(reminder),
+      id: reminder._id,
+      assignee: { ...reminder.assignee, isMe: reminder.assignee?.id === user._id }
+    })) });
   }
 
   if (path === '/api/reminders' && method === 'POST') {
     const workspaceId = requireText(body.workspaceId, 'Workspace ID');
     const workspace = await memberWorkspace(workspaceId, user._id);
     const title = requireText(body.title, 'Reminder title');
+    const assigneeId = typeof body.assignee?.id === 'string' ? body.assignee.id : user._id;
+    const requesterMembership = workspace.members.find((member) => member.userId === user._id);
+    if (assigneeId !== user._id && requesterMembership?.role !== 'admin') {
+      return send(response, 403, { error: 'Only a team admin can assign reminders to another member' });
+    }
+    const assigneeMembership = workspace.members.find((member) => member.userId === assigneeId);
+    if (!assigneeMembership) return send(response, 400, { error: 'Choose a current workspace member as the assignee' });
+    const assigneeUser = await users.findOne({ _id: assigneeId });
+    if (!assigneeUser) return send(response, 400, { error: 'The selected assignee no longer exists' });
     if (!Object.hasOwn(priorityStars, body.priority)) return send(response, 400, { error: 'Priority must be high, medium, or low' });
     const dueDate = requireText(body.dueDate, 'Reminder date', 10);
     const dueTime = requireText(body.dueTime, 'Reminder time', 5);
@@ -434,27 +487,91 @@ async function handle(request, response) {
     const reminder = {
       ...body, _id: id(), workspaceId, creatorUserId: user._id, space: body.space === 'personal' ? 'personal' : workspace.mode, title,
       dueDate, dueTime, dueAt, status: 'open', comments: Array.isArray(body.comments) ? body.comments : [], pokes: 0,
-      assignee: body.assignee && typeof body.assignee === 'object' ? body.assignee : { id: user._id, name: user.name, initials: user.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(), role: 'Member', isMe: true }
+      assignee: {
+        id: assigneeUser._id,
+        name: assigneeUser.name,
+        initials: assigneeUser.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
+        role: assigneeMembership.role === 'admin' ? 'Admin' : 'Member',
+        ...(assigneeUser.avatar ? { avatar: assigneeUser.avatar } : {})
+      }
     };
     delete reminder.id;
     await reminders.insertOne(reminder);
-    return send(response, 201, { ...withoutMongoId(reminder), id: reminder._id });
+    return send(response, 201, {
+      ...withoutMongoId(reminder),
+      id: reminder._id,
+      assignee: { ...reminder.assignee, isMe: reminder.assignee.id === user._id }
+    });
   }
 
-  const reminderMatch = path.match(/^\/api\/reminders\/([a-f\d]+)$/i);
+  const reminderMatch = path.match(/^\/api\/reminders\/([^/]+)$/i);
   if (reminderMatch && method === 'PATCH') {
-    const reminder = await reminders.findOne({ _id: reminderMatch[1] });
+    let reminder = await reminders.findOne({ _id: reminderMatch[1] });
+    if (!reminder && reminderMatch[1].length === 24) {
+      try {
+        const { ObjectId } = require('mongodb');
+        reminder = await reminders.findOne({ _id: new ObjectId(reminderMatch[1]) });
+      } catch (e) {
+        // Ignore invalid ObjectId error
+      }
+    }
     if (!reminder) return send(response, 404, { error: 'Reminder not found' });
     await memberWorkspace(reminder.workspaceId, user._id);
     if (body.status !== undefined && !['open', 'done'].includes(body.status)) return send(response, 400, { error: 'Status must be open or done' });
     const allowedFields = ['title', 'priority', 'due', 'dueDate', 'dueTime', 'comments', 'pokes', 'pokedByMe', 'pokedBy', 'status', 'aiNote', 'source', 'assignee'];
     const updates = Object.fromEntries(Object.entries(body).filter(([key]) => allowedFields.includes(key)));
+    if (updates.assignee !== undefined) {
+      const workspace = await memberWorkspace(reminder.workspaceId, user._id);
+      const requesterMembership = workspace.members.find((member) => member.userId === user._id);
+      if (requesterMembership?.role !== 'admin') return send(response, 403, { error: 'Only a team admin can reassign reminders' });
+      const assigneeId = typeof updates.assignee?.id === 'string' ? updates.assignee.id : '';
+      const assigneeMembership = workspace.members.find((member) => member.userId === assigneeId);
+      if (!assigneeMembership) return send(response, 400, { error: 'Choose a current workspace member as the assignee' });
+      const assigneeUser = await users.findOne({ _id: assigneeId });
+      if (!assigneeUser) return send(response, 400, { error: 'The selected assignee no longer exists' });
+      updates.assignee = {
+        id: assigneeUser._id,
+        name: assigneeUser.name,
+        initials: assigneeUser.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
+        role: assigneeMembership.role === 'admin' ? 'Admin' : 'Member',
+        ...(assigneeUser.avatar ? { avatar: assigneeUser.avatar } : {})
+      };
+    }
     if (updates.priority !== undefined && !Object.hasOwn(priorityStars, updates.priority)) return send(response, 400, { error: 'Priority must be high, medium, or low' });
     await reminders.updateOne({ _id: reminder._id }, { $set: updates });
     const updated = await reminders.findOne({ _id: reminder._id });
-    return send(response, 200, { ...withoutMongoId(updated), id: updated._id });
+    return send(response, 200, {
+      ...withoutMongoId(updated),
+      id: updated._id,
+      assignee: { ...updated.assignee, isMe: updated.assignee?.id === user._id }
+    });
   }
 
+  if (reminderMatch && method === 'DELETE') {
+    let reminder = await reminders.findOne({ _id: reminderMatch[1] });
+    if (!reminder && reminderMatch[1].length === 24) {
+      try {
+        const { ObjectId } = require('mongodb');
+        reminder = await reminders.findOne({ _id: new ObjectId(reminderMatch[1]) });
+      } catch (e) {
+        // Ignore invalid ObjectId error
+      }
+    }
+    if (!reminder) return send(response, 404, { error: 'Reminder not found' });
+    
+    const workspace = await memberWorkspace(reminder.workspaceId, user._id);
+    const requesterMembership = workspace.members.find((member) => member.userId === user._id);
+    
+    if (reminder.creatorUserId !== user._id && requesterMembership?.role !== 'admin') {
+      return send(response, 403, { error: 'You do not have permission to delete this reminder' });
+    }
+
+    await reminders.deleteOne({ _id: reminder._id });
+    
+    return send(response, 200, { ok: true });
+  }
+
+  console.log(`[DEBUG] 404 Route not found -> Method: ${method}, Path: ${path}, Matches: ${!!reminderMatch}`);
   return send(response, 404, { error: 'Route not found' });
 }
 
@@ -462,7 +579,7 @@ const server = createServer((request, response) => {
   const origin = request.headers.origin;
   if (origin && frontendOrigins.has(origin)) {
     response.setHeader('Access-Control-Allow-Origin', origin);
-    response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,OPTIONS');
+    response.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     response.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
     response.setHeader('Vary', 'Origin');
   }
@@ -478,4 +595,9 @@ const server = createServer((request, response) => {
   });
 });
 
-server.listen(port, () => console.log(`Diva API listening on http://localhost:${port}`));
+server.listen(port, () => {
+  console.log(`Diva API listening on http://localhost:${port}`);
+
+  // Start the push notification cron job
+  startNotificationCron({ reminders, users });
+});

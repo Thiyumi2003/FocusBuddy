@@ -7,6 +7,7 @@ export interface Person {
   initials: string;
   role: string;
   isMe?: boolean;
+  avatar?: string;
   avatarUrl?: string;
 }
 
@@ -41,6 +42,7 @@ export interface NewReminderInput {
   title: string;
   priority: Priority;
   forWhom: string;
+  assigneeId?: string;
   due: string;
   dueDate: string;
   dueTime: string;

@@ -9,6 +9,8 @@ import { initialsFrom } from '../utils/validation';
 import { Avatar } from './Avatar';
 import { BrandMark } from './BrandMark';
 import { Mascot } from './Mascot';
+import { TeamSwitcher } from './TeamSwitcher';
+import { InstallAppButton } from './InstallAppButton';
 
 interface SidebarProps {
   active: TabId;
@@ -58,6 +60,8 @@ export function Sidebar({ active, onChange, space, onSpaceChange }: SidebarProps
         }
       </div>
 
+      <TeamSwitcher />
+
       <nav aria-label="Main" className="mt-6 flex flex-col gap-1 px-4">
         {navItems.map(({ id, label, icon: Icon, tone }) => {
           const isActive = active === id;
@@ -83,6 +87,7 @@ export function Sidebar({ active, onChange, space, onSpaceChange }: SidebarProps
       </nav>
 
       <div className="mt-auto space-y-4 p-4">
+        <InstallAppButton />
         <div className="flex items-center gap-2 rounded-2xl bg-lavender-soft p-3">
           <Mascot mood="sleep" size={44} float={false} />
           <p className="text-xs font-semibold leading-snug text-lavender-ink">

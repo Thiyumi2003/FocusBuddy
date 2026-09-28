@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CalendarIcon, CheckIcon, HandIcon, MessageCircleIcon, PointerIcon, SendIcon, SparklesIcon, StarIcon } from 'lucide-react';
+import { CalendarIcon, CheckIcon, HandIcon, MessageCircleIcon, PointerIcon, SendIcon, SparklesIcon, StarIcon, Trash2Icon } from 'lucide-react';
 import { priorityMeta } from '../data/priorities';
 import { Priority, Reminder } from '../types/reminders';
 import { firstName } from '../utils/reminders';
@@ -13,6 +13,7 @@ interface ReminderRowProps {
   onPoke: (id: string) => void;
   onDone: (id: string) => void;
   onComment: (id: string, text: string) => void;
+  onDelete?: (id: string) => void;
 }
 
 const tint: Record<Priority, string> = {
@@ -23,7 +24,7 @@ const tint: Record<Priority, string> = {
 
 const ease = [0.23, 1, 0.32, 1] as const;
 
-export function ReminderRow({ reminder, onPoke, onDone, onComment }: ReminderRowProps) {
+export function ReminderRow({ reminder, onPoke, onDone, onComment, onDelete }: ReminderRowProps) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const { assignee, comments } = reminder;
@@ -162,6 +163,21 @@ export function ReminderRow({ reminder, onPoke, onDone, onComment }: ReminderRow
               </span>
             }
           </motion.button>
+          {onDelete && (
+            <motion.button
+              whileTap={{ scale: 0.92 }}
+              transition={{ duration: 0.12 }}
+              onClick={() => {
+                if (window.confirm('Are you sure you want to delete this reminder?')) {
+                  onDelete(reminder.id);
+                }
+              }}
+              className="inline-flex h-[36px] w-[36px] items-center justify-center rounded-full bg-white text-muted shadow-card transition-colors duration-150 hover:bg-rose-50 hover:text-rose-500"
+              aria-label="Delete Reminder"
+            >
+              <Trash2Icon className="h-4 w-4" aria-hidden />
+            </motion.button>
+          )}
         </div>
       </div>
     </article>);
