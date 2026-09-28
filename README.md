@@ -28,7 +28,7 @@ Both services use the same repository but have separate root directories. Create
 
 1. In Vercel, import this repository. Keep **Root Directory** at the repository root, use the Vite framework preset, build command `npm run build`, and output directory `dist`. Deploy once to get the production domain; API calls will work after the remaining steps.
 2. In Render, create a **Web Service** for this repository. Set **Root Directory** to `backend`, **Build Command** to `npm install`, and **Start Command** to `npm start`.
-3. Add Render environment variables: `MONGODB_URI` (your rotated Atlas URI), `MONGODB_DB` (`diva`), and `FRONTEND_ORIGIN` (the exact Vercel origin, such as `https://your-app.vercel.app`). Render provides `PORT`; the backend now uses it automatically. Do not set `API_PORT` on Render.
+3. Add Render environment variables: `MONGODB_URI` (your rotated Atlas URI), `MONGODB_DB` (`diva`), and `FRONTEND_ORIGIN` (the exact Vercel origin if it differs from `https://focus-buddy-one.vercel.app`). Render provides `PORT`; the backend now uses it automatically. Do not set `API_PORT` on Render.
 4. Deploy the Render service and confirm `https://<your-render-service>.onrender.com/api/health` returns `{"status":"ok","database":"connected"}`.
 5. In Vercel project environment variables, set `VITE_API_URL` to the Render service's public HTTPS URL, with no trailing slash. Apply it to Production (and Preview too if you use preview deployments), then redeploy.
 6. If the Vercel URL changes, update Render's `FRONTEND_ORIGIN` to match exactly and redeploy the Render service. For multiple allowed frontend origins, separate them with commas.

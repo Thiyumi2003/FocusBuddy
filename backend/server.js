@@ -10,6 +10,7 @@ const sessionLifetime = 30 * 24 * 60 * 60 * 1000;
 const priorityStars = { high: 3, medium: 2, low: 1 };
 const mongoUri = process.env.MONGODB_URI;
 const frontendOrigins = new Set([
+  'https://focus-buddy-one.vercel.app',
   'http://localhost:5173',
   'http://localhost:4173',
   ...(process.env.FRONTEND_ORIGIN || '').split(',').map((origin) => origin.trim()).filter(Boolean)
