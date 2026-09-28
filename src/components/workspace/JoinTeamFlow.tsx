@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowRightIcon, LoaderCircleIcon, LockIcon, UsersIcon } from 'lucide-react';
+import { ArrowRightIcon, Clock3Icon, LoaderCircleIcon, LockIcon, UsersIcon } from 'lucide-react';
 import { Workspace } from '../../types/session';
 import { CODE_PATTERN, normaliseCode } from '../../utils/teamCode';
-import { joinTeamWorkspace } from '../../utils/api';
+import { getMyJoinRequests, joinTeamWorkspace } from '../../utils/api';
 import { AuthInput } from '../auth/AuthInput';
 
 const ease = [0.23, 1, 0.32, 1] as const;
@@ -13,6 +13,36 @@ export function JoinTeamFlow({ onEnter }: {onEnter: (workspace: Workspace) => vo
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [joined, setJoined] = useState<Workspace | null>(null);
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
+  const [pendingWorkspaceName, setPendingWorkspaceName] = useState('');
+
+  useEffect(() => {
+    if (!pendingCode) return;
+    let active = true;
+    async function refreshRequest() {
+      try {
+        const requests = await getMyJoinRequests();
+        const request = requests.find((item) => item.teamCode === pendingCode);
+        if (!active || !request) return;
+        setPendingWorkspaceName(request.workspaceName);
+        if (request.status === 'approved' && request.workspace) {
+          setPendingCode(null);
+          onEnter(request.workspace);
+        } else if (request.status === 'rejected') {
+          setPendingCode(null);
+          setError('The team admin declined your request. You can try another invite code.');
+        }
+      } catch {
+        // Retry while the request is pending.
+      }
+    }
+    void refreshRequest();
+    const timer = window.setInterval(() => void refreshRequest(), 5000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [pendingCode, onEnter]);
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!CODE_PATTERN.test(code)) {
@@ -22,7 +52,12 @@ export function JoinTeamFlow({ onEnter }: {onEnter: (workspace: Workspace) => vo
     setLoading(true);
     setError('');
     try {
-      setJoined(await joinTeamWorkspace(code));
+      const result = await joinTeamWorkspace(code);
+      if (result.status === 'joined') setJoined(result.workspace);
+      else {
+        setPendingCode(code);
+        setPendingWorkspaceName(result.workspaceName);
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Could not join that team. Check the code and try again.');
     } finally {
@@ -55,6 +90,15 @@ export function JoinTeamFlow({ onEnter }: {onEnter: (workspace: Workspace) => vo
             <ArrowRightIcon className="h-4 w-4" aria-hidden />
           </button>
           <p className="mt-2 text-xs text-muted">You can customise your AI any time in Personal AI Settings.</p>
+        </motion.div> : pendingCode ?
+      <motion.div key="pending" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-accent-soft">
+            <Clock3Icon className="h-6 w-6 text-accent-ink" aria-hidden />
+          </div>
+          <h2 className="mt-4 text-xl font-semibold text-ink">Request sent</h2>
+          <p className="mt-1 text-sm text-muted">
+            Your request to join {pendingWorkspaceName || 'the team'} is waiting for admin approval. This page will update when it’s accepted.
+          </p>
         </motion.div> :
 
       <motion.form key="form" onSubmit={submit} noValidate exit={{ opacity: 0 }} transition={{ duration: 0.15 }} className="space-y-5">

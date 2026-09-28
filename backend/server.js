@@ -28,6 +28,7 @@ const progressRecords = mongo.collection('progress');
 const settingsRecords = mongo.collection('settings');
 const reminders = mongo.collection('reminders');
 const notificationHistory = mongo.collection('notifications');
+const joinRequests = mongo.collection('joinRequests');
 
 await Promise.all([
   users.createIndex({ email: 1 }, { unique: true }),
@@ -37,7 +38,9 @@ await Promise.all([
   reminders.createIndex({ workspaceId: 1 }),
   reminders.createIndex({ creatorUserId: 1, status: 1, dueAt: 1, notificationSentAt: 1 }),
   notificationHistory.createIndex({ reminderId: 1 }, { unique: true }),
-  notificationHistory.createIndex({ recipientUserId: 1, createdAt: -1 })
+  notificationHistory.createIndex({ recipientUserId: 1, createdAt: -1 }),
+  joinRequests.createIndex({ workspaceId: 1, status: 1, createdAt: 1 }),
+  joinRequests.createIndex({ requesterUserId: 1, status: 1 })
 ]);
 
 await progressRecords.updateMany(
@@ -257,12 +260,78 @@ async function handle(request, response) {
     const code = requireText(body.code, 'Team code', 20).toUpperCase();
     const workspace = await workspaces.findOne({ mode: 'team', code });
     if (!workspace) return send(response, 404, { error: 'No team was found with that code' });
-    await workspaces.updateOne(
-      { _id: workspace._id, 'members.userId': { $ne: user._id } },
-      { $push: { members: { userId: user._id, role: 'member' } } }
+    if (workspace.members.some((member) => member.userId === user._id)) {
+      return send(response, 200, { status: 'joined', workspace: publicWorkspace(workspace, user._id) });
+    }
+    const existingRequest = await joinRequests.findOne({ workspaceId: workspace._id, requesterUserId: user._id, status: 'pending' });
+    if (existingRequest) return send(response, 202, { status: 'pending', workspaceName: workspace.name });
+    await joinRequests.insertOne({
+      _id: id(),
+      workspaceId: workspace._id,
+      workspaceName: workspace.name,
+      teamCode: code,
+      requesterUserId: user._id,
+      requesterName: user.name,
+      requesterEmail: user.email,
+      status: 'pending',
+      createdAt: new Date()
+    });
+    return send(response, 202, { status: 'pending', workspaceName: workspace.name });
+  }
+
+  if (method === 'GET' && path === '/api/workspaces/join-requests/mine') {
+    const requests = await joinRequests.find({ requesterUserId: user._id, status: { $in: ['pending', 'approved', 'rejected'] } }).sort({ createdAt: -1 }).limit(20).toArray();
+    const results = await Promise.all(requests.map(async (request) => {
+      const workspace = await workspaces.findOne({ _id: request.workspaceId });
+      return {
+        id: request._id,
+        status: request.status,
+        workspaceName: request.workspaceName,
+        teamCode: request.teamCode,
+        ...(request.status === 'approved' && workspace ? { workspace: publicWorkspace(workspace, user._id) } : {})
+      };
+    }));
+    return send(response, 200, { requests: results });
+  }
+
+  if (method === 'GET' && path === '/api/workspaces/join-requests') {
+    const adminWorkspaces = await workspaces.find({ members: { $elemMatch: { userId: user._id, role: 'admin' } } }, { projection: { _id: 1 } }).toArray();
+    const workspaceIds = adminWorkspaces.map((workspace) => workspace._id);
+    const requests = await joinRequests.find({ workspaceId: { $in: workspaceIds }, status: 'pending' }).sort({ createdAt: 1 }).toArray();
+    return send(response, 200, { requests: requests.map((request) => ({
+      id: request._id,
+      workspaceId: request.workspaceId,
+      workspaceName: request.workspaceName,
+      requesterName: request.requesterName,
+      requesterEmail: request.requesterEmail,
+      createdAt: request.createdAt
+    })) });
+  }
+
+  const joinRequestMatch = path.match(/^\/api\/workspaces\/join-requests\/([a-f\d]+)\/(approve|decline)$/i);
+  if (joinRequestMatch && method === 'POST') {
+    const [, requestId, action] = joinRequestMatch;
+    const joinRequest = await joinRequests.findOne({ _id: requestId, status: 'pending' });
+    if (!joinRequest) return send(response, 404, { error: 'Pending join request not found' });
+    const workspace = await memberWorkspace(joinRequest.workspaceId, user._id);
+    if (!workspace.members.some((member) => member.userId === user._id && member.role === 'admin')) {
+      return send(response, 403, { error: 'Only a workspace admin can review join requests' });
+    }
+    const status = action === 'approve' ? 'approved' : 'rejected';
+    const result = await joinRequests.updateOne(
+      { _id: joinRequest._id, status: 'pending' },
+      { $set: { status, reviewedBy: user._id, reviewedAt: new Date() } }
     );
-    const joined = await workspaces.findOne({ _id: workspace._id });
-    return send(response, 200, { workspace: publicWorkspace(joined, user._id) });
+    if (!result.modifiedCount) return send(response, 409, { error: 'This join request has already been reviewed' });
+    if (action === 'approve') {
+      await workspaces.updateOne(
+        { _id: workspace._id, 'members.userId': { $ne: joinRequest.requesterUserId } },
+        { $push: { members: { userId: joinRequest.requesterUserId, role: 'member' } } }
+      );
+      const updatedWorkspace = await workspaces.findOne({ _id: workspace._id });
+      return send(response, 200, { status, workspace: publicWorkspace(updatedWorkspace, joinRequest.requesterUserId) });
+    }
+    return send(response, 200, { status });
   }
 
   if (method === 'GET' && path === '/api/progress') return send(response, 200, withoutMongoId(await ensureProgress(user._id)));

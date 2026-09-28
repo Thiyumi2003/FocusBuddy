@@ -45,6 +45,10 @@ The standalone server is [backend/server.js](backend/server.js). It stores users
 - `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`
 - `GET /api/session`
 - `GET /api/workspaces`, `POST /api/workspaces`, `POST /api/workspaces/join`, `POST /api/workspaces/personal`
+- `GET /api/workspaces/join-requests`, `GET /api/workspaces/join-requests/mine`
+- `POST /api/workspaces/join-requests/:id/approve`, `POST /api/workspaces/join-requests/:id/decline`
+- `GET /api/workspaces/join-requests`, `GET /api/workspaces/join-requests/mine`
+- `POST /api/workspaces/join-requests/:id/approve`, `POST /api/workspaces/join-requests/:id/decline`
 - `GET /api/progress`, `POST /api/progress/complete`
 - `GET /api/settings`, `PUT /api/settings`
 - `GET /api/reminders?workspaceId=...`, `POST /api/reminders`, `PATCH /api/reminders/:id`

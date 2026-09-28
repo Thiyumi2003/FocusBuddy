@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MobileNav } from '../components/MobileNav';
 import { ReminderNotifications } from '../components/ReminderNotifications';
+import { TeamJoinRequests } from '../components/TeamJoinRequests';
 import { Sidebar } from '../components/Sidebar';
 import { SloganBanner } from '../components/SloganBanner';
 import { useSession } from '../contexts/SessionContext';
@@ -28,6 +29,7 @@ export function Dashboard() {
         <MobileNav active={tab} onChange={changeTab} space={space} onSpaceChange={setSpace} />
         <SloganBanner />
         <ReminderNotifications />
+        <TeamJoinRequests />
         <main className="flex-1">
           <div hidden={tab !== 'team'}>
             <TeamSpace space={space} onOpenProgress={() => changeTab('progress')} />

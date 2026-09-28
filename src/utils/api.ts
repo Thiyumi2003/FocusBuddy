@@ -73,11 +73,33 @@ export async function createTeamWorkspace(payload: { name: string; category: str
 }
 
 export async function joinTeamWorkspace(code: string) {
-  const result = await authenticatedRequest<{ workspace: Workspace }>('/api/workspaces/join', {
+  return authenticatedRequest<{ status: 'pending'; workspaceName: string } | { status: 'joined'; workspace: Workspace }>('/api/workspaces/join', {
     method: 'POST',
     body: JSON.stringify({ code })
   });
-  return result.workspace;
+}
+
+export interface TeamJoinRequest {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  requesterName: string;
+  requesterEmail: string;
+  createdAt: string;
+}
+
+export async function getTeamJoinRequests() {
+  const result = await authenticatedRequest<{ requests: TeamJoinRequest[] }>('/api/workspaces/join-requests');
+  return result.requests;
+}
+
+export async function reviewTeamJoinRequest(requestId: string, action: 'approve' | 'decline') {
+  return authenticatedRequest<{ status: 'approved' | 'rejected'; workspace?: Workspace }>(`/api/workspaces/join-requests/${requestId}/${action}`, { method: 'POST' });
+}
+
+export async function getMyJoinRequests() {
+  const result = await authenticatedRequest<{ requests: { id: string; status: 'pending' | 'approved' | 'rejected'; workspaceName: string; teamCode: string; workspace?: Workspace }[] }>('/api/workspaces/join-requests/mine');
+  return result.requests;
 }
 
 export async function getReminders(workspaceId: string) {
